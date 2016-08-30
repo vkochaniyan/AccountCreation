@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw"
+	xmlns:db="http://www.mulesoft.org/schema/mule/db"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/apikit" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/apikit http://www.mulesoft.org/schema/mule/apikit/current/mule-apikit.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.1.xsd">
+    <http:listener-config name="suntrust-httpListenerConfig" host="0.0.0.0" port="8081" doc:name="HTTP Listener Configuration"/>
+    <db:oracle-config name="Oracle_Configuration" host="10.7.153.173" port="1521" instance="oratest" user="muleuser" password="mule123" doc:name="Oracle Configuration"/>
+    <apikit:config name="suntrust-config" raml="suntrust.raml" consoleEnabled="false" doc:name="Router"/>
+    <flow name="suntrust-main">
+        <http:listener config-ref="suntrust-httpListenerConfig" path="/api/*" doc:name="HTTP"/>
+        <apikit:router config-ref="suntrust-config" doc:name="APIkit Router"/>
+        <exception-strategy ref="suntrust-apiKitGlobalExceptionMapping" doc:name="Reference Exception Strategy"/>
+    </flow>
+    <flow name="suntrust-console">
+        <http:listener config-ref="suntrust-httpListenerConfig" path="/console/*" doc:name="HTTP"/>
+        <apikit:console config-ref="suntrust-config" doc:name="APIkit Console"/>
+    </flow>
+    <flow name="get:/User_accounts:suntrust-config">
+        <set-session-variable variableName="User_Id" value="#[message.inboundProperties.'http.query.params'.userid]" doc:name="UserID_ Variable"/>
+        <set-session-variable variableName="AccountType" value="#[message.inboundProperties.'http.query.params'.accountType ]" doc:name="AccountType_Variable"/>
+        <db:select config-ref="Oracle_Configuration" doc:name="Database">
+            <db:parameterized-query><![CDATA[select count(*) from SUNTRUST_USER where User_ID=#[sessionVars.User_Id]]]></db:parameterized-query>
+        </db:select>
+        <logger message="#[payload]" level="INFO" doc:name="Logger"/>
+
+        <logger message="#[payload[0]['count(*)']]" level="INFO" doc:name="Logger"/>
+        <set-session-variable variableName="check" value="#[payload[0]['count(*)']]" doc:name="Session Variable"/>
+        <choice doc:name="Choice">
+            <when expression="#[sessionVars.check==1]">
+                <db:insert config-ref="Oracle_Configuration" doc:name="Database">
+                    <db:parameterized-query><![CDATA[INSERT INTO User_Account (User_ID,Account_Type) values (#[sessionVars.User_Id],#[sessionVars.AccountType])]]></db:parameterized-query>
+                </db:insert>
+                <db:select config-ref="Oracle_Configuration" doc:name="Database">
+                    <db:parameterized-query><![CDATA[select AccountNo from User_Account where User_ID=#[sessionVars.User_Id]  and Account_Type=#[sessionVars.AccountType] and DATEOFCREATION like ( SELECT SYSDATE FROM DUAL)]]></db:parameterized-query>
+                </db:select>
+                <logger message="#[payload]" level="INFO" doc:name="Logger"/>
+                <dw:transform-message doc:name="Transform Message">
+                    <dw:set-payload><![CDATA[%dw 1.0
+%output application/json
+---
+payload map
+{
+	Validation : "True",
+    AccountCreation : "True",
+    UserID : sessionVars.User_Id,
+    AccountNumber : $.ACCOUNTNO,
+    AccountType : sessionVars.AccountType
+}]]></dw:set-payload>
+                </dw:transform-message>
+                <set-payload value="#[payload]" doc:name="Set Payload"/>
+            </when>
+            <when expression="#[sessionVars.check!=1]">
+                <set-payload value="{&quot;Validation&quot; : &quot;False&quot; , &quot;Message&quot; : &quot;Please enter a valid ID&quot; }" doc:name="Set Payload"/>
+            </when>
+            <otherwise>
+                <logger message="{&quot;message&quot; : &quot;Invalid Data&quot;}" level="INFO" doc:name="Logger"/>
+            </otherwise>
+        </choice>
+
+    </flow>
+    <flow name="get:/echo:suntrust-config">
+        <set-payload value="#[&quot;Hello &quot;+message.inboundProperties.'http.query.params'.param]" doc:name="Set Payload"/>
+    </flow>
+    <flow name="post:/User_accounts:suntrust-config">
+        <set-payload value="#[NullPayload.getInstance()]" doc:name="Set Payload"/>
+    </flow>
+    <apikit:mapping-exception-strategy name="suntrust-apiKitGlobalExceptionMapping">
+        <apikit:mapping statusCode="404">
+            <apikit:exception value="org.mule.module.apikit.exception.NotFoundException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Resource not found&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="405">
+            <apikit:exception value="org.mule.module.apikit.exception.MethodNotAllowedException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Method not allowed&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="415">
+            <apikit:exception value="org.mule.module.apikit.exception.UnsupportedMediaTypeException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Unsupported media type&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="406">
+            <apikit:exception value="org.mule.module.apikit.exception.NotAcceptableException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Not acceptable&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+        <apikit:mapping statusCode="400">
+            <apikit:exception value="org.mule.module.apikit.exception.BadRequestException" />
+            <set-property propertyName="Content-Type" value="application/json" doc:name="Property"/>
+            <set-payload value="{ &quot;message&quot;: &quot;Bad request&quot; }" doc:name="Set Payload"/>
+        </apikit:mapping>
+    </apikit:mapping-exception-strategy>
+</mule>

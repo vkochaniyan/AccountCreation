@@ -1,0 +1,33 @@
+#%RAML 0.8
+baseUri: https://mocksvc.mulesoft.com/mocks/090d2bed-237e-4ad6-94e4-973013c1d4f2
+#baseUri: http://suntrustconsumer.com
+title: suntrust
+version: 1.0
+/User_accounts:
+    get:
+      queryParameters:
+        userid:
+        accountType:
+          enum: [savings,credit, checkin]
+      responses:
+        200 :
+          body :
+            application/json:
+             example : |
+              {"User_Id" : "20000"}   
+    post:
+/echo:
+    get:
+      queryParameters:
+         param:
+      responses:
+         200:
+            body:
+              application/json:
+               example: |
+                {"param":"value"}
+
+
+   
+
+ 
